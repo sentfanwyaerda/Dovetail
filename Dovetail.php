@@ -52,18 +52,22 @@ class dovetail{
 			if(preg_match("#^[\.]+$#", $f)){
 				/*ignore*/
 			}
-			elseif(preg_match("#[^\.]+[\.]((".implode('|', $this->allowed_extensions)."))$#i", $f)){
-				$files[] = $directory.DIRECTORY_SEPERATOR.$f;
-				if($auto_open !== FALSE){ self::open_file($directory.DIRECTORY_SEPERATOR.$f); }
+			elseif(preg_match("#[^\.]+[\.]((".implode('|', $this->allowed_extensions)."))$#i", $f, $buffer)){
+				$files[] = self::_trailing_slash($directory).$f;
+				if($auto_open !== FALSE){
+					self::dc_open_file(self::_trailing_slash($directory).$f, $buffer[1]);
+					//self::open_file(self::_trailing_slash($directory).$f);
+				}
 			}
-			elseif($open_subdirectories !== FALSE && is_dir($directory.DIRECTORY_SEPERATOR.$f)){
-				$files = array_merge($files, self::open_directory($directory.DIRECTORY_SEPERATOR.$f, $auto_open, $open_subdirectories) );
+			elseif($open_subdirectories !== FALSE && is_dir(self::_trailing_slash($directory).$f)){
+				$files = array_merge($files, self::open_directory(self::_trailing_slash($directory).$f, $auto_open, $open_subdirectories) );
 			}
 		}
 		return $files;
 	}
-	function dc_open_file($filename){
+	function dc_open_file($filename, $extension=NULL){
 		$this->files[self::hash_file($filename)] = $filename;
+		self::identify_entries(file_get_contents($filename), $extension);
 	}
 	function hash_file($filename){
 		/*development*/ return md5($filename);
@@ -82,10 +86,40 @@ class dovetail{
 					break;
 			}
 		}
+	}	
+	/***************************************************
+	 * Entry identification
+	 ***************************************************/
+	var $entry = array();
+	/*array*/ function identify_entries($blob, $extension="json"){
+		switch(strtolower($extension)){
+			case 'hermes':
+				$list = explode(",\r\n", $blob);
+				/*last record fix*/ if($list[count($list) -1] == NULL){ unset($list[count($list) -1]); }
+				$this->entry = array_merge($this->entry, $list);
+				return $list;
+				break;
+			case 'json': default:
+				$first = substr($blob, 0, 1); $last = substr(trim($blob), -1, 1);
+				switch($first){
+					case '[': /*array: multiple entries*/
+							$json = json_decode(utf8_encode($blob), TRUE);
+							$list = array();
+							foreach($json as $i=>$e){
+								$list[] = json_encode($e);
+							}
+							$this->entry = array_merge($this->entry, $list);
+						break;
+					case '{': /*record: single entry*/
+						if($last == '}'){ $this->entry[] = $blob; }
+						break;
+					default: /*unknown*/
+				}
+		}
 	}
 	
 	/***************************************************
-	 * Entry acces
+	 * Entry access
 	 ***************************************************/
 	private $_entry = array();
 	function entry(){
@@ -115,6 +149,33 @@ class dovetail{
 			return $entry[$variable];
 		}
 		else{ return FALSE; }
+	}
+	
+	private function _trailing_slash($directory){
+		return $directory.(substr($directory, -1) !== DIRECTORY_SEPARATOR ? DIRECTORY_SEPARATOR : NULL);
+	}
+		
+	/***************************************************
+	 * Methods
+	 ***************************************************/
+	function count($item=FALSE, /*group_by,unique,value*/ $unique=FALSE){
+		if($item === FALSE){
+			return count($this->entry);
+		}
+		else{
+			$count = 0;
+			$match = array();
+			foreach($this->entry as $entry){
+				$json = (!is_array($entry) ? json_decode(utf8_encode($entry), TRUE) : $entry);
+				//*debug*/ print $entry .' = '; print_r($json); print "\n";
+				if(isset($json[$item])){
+					$count++;
+					$match[$json[$item]] = (isset($match[$json[$item]]) ? $match[$json[$item]] + 1 : 1 );
+				}
+			}
+			//*debug*/ print $item.' &rarr; '; print_r($match); print "\n";
+			return ($unique === NULL ? $match : ($unique !== FALSE ? ($unique !== TRUE ? (isset($match[$unique]) ? $match[$unique] : 0) : count($match)) : $count));
+		}
 	}
 }
 
